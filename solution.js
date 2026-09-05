@@ -1,149 +1,79 @@
-import fs from "fs";
+const fs = require('fs');
+const data = JSON.parse(fs.readFileSync('testcase.json', 'utf8'));
 
-// Read JSON file
-const data = JSON.parse(
-    fs.readFileSync("./testcase.json", "utf8")
-);
-
-const n = Number(data.keys.n);
-const k = Number(data.keys.k);
-
-// Convert value from given base to BigInt
-function convertToDecimal(value, base) {
-    const digits = "0123456789abcdefghijklmnopqrstuvwxyz";
+function decodeValue(value, base) {
+    base = BigInt(base);
     let result = 0n;
-    base = Number(base);
-
-    for (const ch of value.toLowerCase()) {
-        const digit = digits.indexOf(ch);
-
-        if (digit === -1 || digit >= base) {
-            throw new Error(
-                "Invalid digit " + ch + " for base " + base
-            );
-        }
-
-        result = result * BigInt(base) + BigInt(digit);
+    let chars = "0123456789abcdefghijklmnopqrstuvwxyz";
+    value = value.toLowerCase();
+    for (let c of value) {
+        result = result * base + BigInt(chars.indexOf(c));
     }
-
     return result;
 }
 
-// GCD
+let points = [];
+for (let key in data) {
+    if (key === "keys") continue;
+    let x = BigInt(key);
+    let y = decodeValue(data[key].value, data[key].base);
+    points.push({ x, y });
+}
+
+let k = data.keys.k;
+
 function gcd(a, b) {
-    a = a < 0n ? -a : a;
-    b = b < 0n ? -b : b;
-
-    while (b !== 0n) {
-        const temp = a % b;
-        a = b;
-        b = temp;
-    }
-
+    a = a < 0n? -a : a;
+    b = b < 0n? -b : b;
+    while (b!== 0n) { let t = b; b = a % b; a = t; }
     return a;
 }
 
-// Fraction
-class Fraction {
-    constructor(num, den = 1n) {
-        if (den === 0n) {
-            throw new Error("Division by zero");
+function lagrangeAt0(pts) {
+    let resNum = 0n;
+    let resDen = 1n;
+    for (let j = 0; j < pts.length; j++) {
+        let num = 1n, den = 1n;
+        for (let m = 0; m < pts.length; m++) {
+            if (m === j) continue;
+            num *= -pts[m].x;
+            den *= (pts[j].x - pts[m].x);
         }
-
-        if (den < 0n) {
-            num = -num;
-            den = -den;
-        }
-
-        const g = gcd(num, den);
-
-        this.num = num / g;
-        this.den = den / g;
+        // res = res + pts[j].y * num/den
+        let y_num = pts[j].y * num;
+        let newNum = resNum * den + y_num * resDen;
+        let newDen = resDen * den;
+        let g = gcd(newNum, newDen);
+        resNum = newNum / g;
+        resDen = newDen / g;
     }
-
-    add(other) {
-        return new Fraction(
-            this.num * other.den +
-            other.num * this.den,
-            this.den * other.den
-        );
-    }
-
-    multiply(other) {
-        return new Fraction(
-            this.num * other.num,
-            this.den * other.den
-        );
-    }
-
-    toString() {
-        if (this.den === 1n) {
-            return this.num.toString();
-        }
-
-        return this.num.toString() + "/" + this.den.toString();
-    }
+    return resNum / resDen;
 }
 
-// Lagrange interpolation P(0)
-function lagrangeAtZero(points) {
-    let result = new Fraction(0n);
-
-    for (let i = 0; i < points.length; i++) {
-        const xi = points[i].x;
-        const yi = points[i].y;
-
-        let term = new Fraction(yi);
-
-        for (let j = 0; j < points.length; j++) {
-            if (i === j) {
-                continue;
-            }
-
-            const xj = points[j].x;
-
-            term = term.multiply(
-                new Fraction(-xj, xi - xj)
-            );
+// Try all combos to find correct secret (handles corrupted shares)
+function getCombinations(arr, k) {
+    let result = [];
+    function backtrack(start, cur) {
+        if (cur.length === k) { result.push([...cur]); return; }
+        for (let i = start; i < arr.length; i++) {
+            cur.push(arr[i]);
+            backtrack(i + 1, cur);
+            cur.pop();
         }
-
-        result = result.add(term);
     }
-
+    backtrack(0, []);
     return result;
 }
 
-// Read the points
-const points = [];
-
-for (let i = 1; i <= n; i++) {
-    const item = data[String(i)];
-
-    points.push({
-        x: BigInt(i),
-        y: convertToDecimal(item.value, item.base)
-    });
+let combos = getCombinations(points, k);
+let freq = new Map();
+for (let c of combos) {
+    let secret = lagrangeAt0(c).toString();
+    freq.set(secret, (freq.get(secret) || 0) + 1);
 }
 
-// Use the first k required roots
-const selectedPoints = points.slice(0, k);
+let sorted = [...freq.entries()].sort((a, b) => b[1] - a[1]);
+console.log("Most common secrets:");
+sorted.slice(0,5).forEach(([sec, count]) => console.log(sec, "->", count, "times"));
 
-// Calculate polynomial value at x = 0
-const answer = lagrangeAtZero(selectedPoints);
-
-console.log("n =", n);
-console.log("k =", k);
-
-console.log("\nSelected points:");
-
-for (const point of selectedPoints) {
-    console.log(
-        "x = " +
-        point.x.toString() +
-        ", y = " +
-        point.y.toString()
-    );
-}
-
-console.log("\nAnswer:");
-console.log(answer.toString());
+console.log("\nFINAL SECRET:", sorted[0][0]);
